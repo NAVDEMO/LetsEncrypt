@@ -38,13 +38,16 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
     try {
         Write-Host "Using LetsEncrypt to create SSL Certificate"
 
-        Write-Host "Using default website for LetsEncrypt"
-        
-        Write-Host "Installing NuGet PackageProvider"
-        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
-        
-        Write-Host "Installing ACME-PS PowerShell Module"
-        Install-Module -Name ACME-PS -RequiredVersion "1.5.0" -Force
+        $nuGetProvider = Get-PackageProvider -Name NuGet
+        if ((-not $nuGetProvider) -or ([Version]$nuGetProvider.Version -lt [Version]"2.8.5.201")) {
+            Write-Host "Installing NuGet Package Provider"
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
+        }
+        $acmePSModule = Get-InstalledModule -Name ACME-PS
+        if ((-not $acmePSModule) -or ([Version]$acmePSModule.Version -lt [Version]"1.5.0")) {
+            Write-Host "Installing ACME-PS PowerShell Module"
+            Install-Module -Name ACME-PS -RequiredVersion "1.5.0" -Force
+        }
 
         Write-Host "Importing ACME-PS module"
         Import-Module ACME-PS
