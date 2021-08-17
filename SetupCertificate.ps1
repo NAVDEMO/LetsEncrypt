@@ -53,27 +53,31 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         $stateDir = Join-Path $myPath 'acmeState'
 
         Write-Host "Initializing ACME State"
-        $state = New-ACMEState -Path $stateDir
+        New-ACMEState -Path $stateDir
 
         Write-Host "Registring Contact EMail address and accept Terms Of Service"
-        Get-ACMEServiceDirectory $state -ServiceName "LetsEncrypt" -PassThru | Out-Null
-        New-ACMENonce $state | Out-Null
-        New-ACMEAccountKey $state -PassThru | Out-Null
-        New-ACMEAccount $state -EmailAddresses $ContactEMailForLetsEncrypt -AcceptTOS | Out-Null
+        Get-ACMEServiceDirectory -State $stateDir -ServiceName "LetsEncrypt" -PassThru | Out-Null
+
+        Write-Host "New Nonce"
+        New-ACMENonce -State $stateDir | Out-Null
+
+        Write-Host "New AccountKey"
+        New-ACMEAccountKey -state $stateDir -PassThru | Out-Null
+
+        Write-Host "New Account"
+        New-ACMEAccount -state $stateDir -EmailAddresses $ContactEMailForLetsEncrypt -AcceptTOS | Out-Null
 
         Write-Host "Creating new dns Identifier"
-        $state = Get-ACMEState -Path $stateDir
-        New-ACMENonce $state -PassThru | Out-Null
         $identifier = New-ACMEIdentifier $publicDnsName
     
         Write-Host "Creating ACME Order"
-        $order = New-ACMEOrder $state -Identifiers $identifier
+        $order = New-ACMEOrder -state $stateDir -Identifiers $identifier
     
         Write-Host "Getting ACME Authorization"
-        $authZ = Get-ACMEAuthorization -State $state -Order $order
+        $authZ = Get-ACMEAuthorization -State $stateDir -Order $order
     
         Write-Host "Getting ACME Challenge"
-        $challenge = Get-ACMEChallenge $state $authZ "http-01"
+        $challenge = Get-ACMEChallenge -state $stateDir $authZ "http-01"
     
         # Create the file requested by the challenge
         $fileName = "C:\inetpub\wwwroot$($challenge.Data.RelativeUrl)"
@@ -89,29 +93,29 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
     
         Write-Host "Completing ACME Challenge"
         # Signal the ACME server that the challenge is ready
-        $challenge | Complete-ACMEChallenge $state | Out-Null
+        $challenge | Complete-ACMEChallenge $stateDir | Out-Null
     
         # Wait a little bit and update the order, until we see the states
         while($order.Status -notin ("ready","invalid")) {
             Start-Sleep -Seconds 10
-            $order | Update-ACMEOrder $state -PassThru | Out-Null
+            $order | Update-ACMEOrder -state $stateDir -PassThru | Out-Null
         }
     
         $certKeyFile = "$stateDir\$publicDnsName-$(get-date -format yyyy-MM-dd-HH-mm-ss).key.xml"
         $certKey = New-ACMECertificateKey -path $certKeyFile
     
         Write-Host "Completing ACME Order"
-        Complete-ACMEOrder $state -Order $order -CertificateKey $certKey | Out-Null
+        Complete-ACMEOrder -state $stateDir -Order $order -CertificateKey $certKey | Out-Null
     
         # Now we wait until the ACME service provides the certificate url
         while(-not $order.CertificateUrl) {
             Start-Sleep -Seconds 15
-            $order | Update-Order $state -PassThru | Out-Null
+            $order | Update-Order -state $stateDir -PassThru | Out-Null
         }
     
         # As soon as the url shows up we can create the PFX
         Write-Host "Exporting certificate to $certificatePfxFilename"
-        Export-ACMECertificate $state -Order $order -CertificateKey $certKey -Path $certificatePfxFilename -Password $certificatePfxPassword
+        Export-ACMECertificate -state $stateDir -Order $order -CertificateKey $certKey -Path $certificatePfxFilename -Password $certificatePfxPassword
     
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certificatePfxFile, $certificatePfxPassword)
         $certificateThumbprint = $cert.Thumbprint
