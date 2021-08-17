@@ -43,40 +43,64 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         Write-Host "Installing NuGet PackageProvider"
         Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
         
-        Write-Host "Installing ACMESharp PowerShell modules"
-        Install-Module -Name ACMESharp -AllowClobber -force | Out-Null
-        Install-Module -Name ACMESharp.Providers.IIS -force | Out-Null
-        Import-Module ACMESharp
-        Enable-ACMEExtensionModule -ModuleName ACMESharp.Providers.IIS | Out-Null
-        Write-Host "Initializing ACMEVault"
-        Initialize-ACMEVault
-                    
-        Write-Host "Registering Contact EMail address and accept Terms Of Service"
-        New-ACMERegistration -Contacts "mailto:$ContactEMailForLetsEncrypt" -AcceptTos | Out-Null
-                    
-        Write-Host "Creating new dns Identifier"
-        $dnsAlias = "dnsAlias"
-        New-ACMEIdentifier -Dns $publicDnsName -Alias $dnsAlias | Out-Null
-        
-        Write-Host "Performing Lets Encrypt challenge to default web site"
-        Complete-ACMEChallenge -IdentifierRef $dnsAlias -ChallengeType http-01 -Handler iis -HandlerParameters @{ WebSiteRef = 'Default Web Site' } | Out-Null
-        Submit-ACMEChallenge -IdentifierRef $dnsAlias -ChallengeType http-01 | Out-Null
-        sleep -s 60
-        Update-ACMEIdentifier -IdentifierRef $dnsAlias | Out-Null
-        
-        Write-Host "Requesting certificate"
-        $certAlias = "certAlias"
-        $certificatePfxPassword = [GUID]::NewGuid().ToString()
+        Write-Host "Importing ACME-PS module (need 1.1.0-beta or higher)"
+        Import-Module ACME-PS
+
         $certificatePfxFile = Join-Path $myPath "certificate.pfx"
-        New-ACMECertificate -Generate -IdentifierRef $dnsAlias -Alias $certAlias | Out-Null
-        Submit-ACMECertificate -CertificateRef $certAlias | Out-Null
-        Update-ACMECertificate -CertificateRef $certAlias | Out-Null
-        Get-ACMECertificate -CertificateRef $certAlias -ExportPkcs12 $certificatePfxFile -CertificatePassword $certificatePfxPassword | Out-Null
-        
-        $certificatePemFile = Join-Path $myPath "certificate.pem"
-        Remove-Item -Path $certificatePemFile -Force -ErrorAction Ignore | Out-Null
-        Get-ACMECertificate -CertificateRef $certAlias -ExportKeyPEM $certificatePemFile | Out-Null
-        
+        $stateDir = Join-Path $myPath 'acmeState'
+
+        Write-Host "Creating new dns Identifier"
+        $state = Get-ACMEState -Path $stateDir
+        New-ACMENonce $state -PassThru | Out-Null
+        $identifier = New-ACMEIdentifier $publicDnsName
+    
+        Write-Host "Creating ACME Order"
+        $order = New-ACMEOrder $state -Identifiers $identifier
+    
+        Write-Host "Getting ACME Authorization"
+        $authZ = Get-ACMEAuthorization -State $state -Order $order
+    
+        Write-Host "Getting ACME Challenge"
+        $challenge = Get-ACMEChallenge $state $authZ "http-01"
+    
+        # Create the file requested by the challenge
+        $fileName = "C:\inetpub\wwwroot$($challenge.Data.RelativeUrl)"
+        $challengePath = [System.IO.Path]::GetDirectoryName($filename);
+        if(-not (Test-Path $challengePath)) {
+            New-Item -Path $challengePath -ItemType Directory | Out-Null
+        }
+    
+        Set-Content -Path $fileName -Value $challenge.Data.Content -NoNewLine
+    
+        # Check if the challenge is readable
+        Invoke-WebRequest $challenge.Data.AbsoluteUrl -UseBasicParsing | Out-Null
+    
+        Write-Host "Completing ACME Challenge"
+        # Signal the ACME server that the challenge is ready
+        $challenge | Complete-ACMEChallenge $state | Out-Null
+    
+        # Wait a little bit and update the order, until we see the states
+        while($order.Status -notin ("ready","invalid")) {
+            Start-Sleep -Seconds 10
+            $order | Update-ACMEOrder $state -PassThru | Out-Null
+        }
+    
+        $certKeyFile = "$stateDir\$publicDnsName-$(get-date -format yyyy-MM-dd-HH-mm-ss).key.xml"
+        $certKey = New-ACMECertificateKey -path $certKeyFile
+    
+        Write-Host "Completing ACME Order"
+        Complete-ACMEOrder $state -Order $order -CertificateKey $certKey | Out-Null
+    
+        # Now we wait until the ACME service provides the certificate url
+        while(-not $order.CertificateUrl) {
+            Start-Sleep -Seconds 15
+            $order | Update-Order $state -PassThru | Out-Null
+        }
+    
+        # As soon as the url shows up we can create the PFX
+        Write-Host "Exporting certificate to $certificatePfxFilename"
+        Export-ACMECertificate $state -Order $order -CertificateKey $certKey -Path $certificatePfxFilename -Password $certificatePfxPassword
+    
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certificatePfxFile, $certificatePfxPassword)
         $certificateThumbprint = $cert.Thumbprint
         
