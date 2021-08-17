@@ -74,26 +74,31 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         $order = New-ACMEOrder -state $stateDir -Identifiers $identifier
     
         Write-Host "Getting ACME Authorization"
-        $authZ = Get-ACMEAuthorization -State $stateDir -Order $order
+        $authorizations = @(Get-ACMEAuthorization -State $acmeStateDir -Order $order);
+
+        foreach($authz in $authorizations) {
+            # Select a challenge to fullfill
+            Write-Host "Getting ACME Challenge"
+            $challenge = Get-ACMEChallenge -State $acmeStateDir -Authorization $authZ -Type "http-01";
     
-        Write-Host "Getting ACME Challenge"
-        $challenge = Get-ACMEChallenge -state $stateDir $authZ "http-01"
+            # Create the file requested by the challenge
+            $fileName = Join-Path "C:\inetpub\wwwroot" $challenge.Data.RelativeUrl
+            $challengePath = [System.IO.Path]::GetDirectoryName($filename);
+
+            if(-not (Test-Path $challengePath)) {
+                New-Item -Path $challengePath -ItemType Directory | Out-Null
+            }
     
-        # Create the file requested by the challenge
-        $fileName = "C:\inetpub\wwwroot$($challenge.Data.RelativeUrl)"
-        $challengePath = [System.IO.Path]::GetDirectoryName($filename);
-        if(-not (Test-Path $challengePath)) {
-            New-Item -Path $challengePath -ItemType Directory | Out-Null
+            Set-Content -Path $fileName -Value $challenge.Data.Content -NoNewLine
+    
+            # Check if the challenge is readable
+            Write-Host "Check Challenge"
+            Invoke-WebRequest $challenge.Data.AbsoluteUrl -UseBasicParsing | Out-Null
+    
+            Write-Host "Completing ACME Challenge"
+            # Signal the ACME server that the challenge is ready
+            $challenge | Complete-ACMEChallenge $stateDir | Out-Null
         }
-    
-        Set-Content -Path $fileName -Value $challenge.Data.Content -NoNewLine
-    
-        # Check if the challenge is readable
-        Invoke-WebRequest $challenge.Data.AbsoluteUrl -UseBasicParsing | Out-Null
-    
-        Write-Host "Completing ACME Challenge"
-        # Signal the ACME server that the challenge is ready
-        $challenge | Complete-ACMEChallenge $stateDir | Out-Null
     
         # Wait a little bit and update the order, until we see the states
         while($order.Status -notin ("ready","invalid")) {
