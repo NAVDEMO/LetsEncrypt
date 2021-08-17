@@ -52,6 +52,15 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         $certificatePfxFile = Join-Path $myPath "certificate.pfx"
         $stateDir = Join-Path $myPath 'acmeState'
 
+        Write-Host "Initializing ACME State"
+        $state = New-ACMEState -Path $stateDir
+
+        Write-Host "Registring Contact EMail address and accept Terms Of Service"
+        Get-ACMEServiceDirectory $state -ServiceName "LetsEncrypt" -PassThru | Out-Null
+        New-ACMENonce $state | Out-Null
+        New-ACMEAccountKey $state -PassThru | Out-Null
+        New-ACMEAccount $state -EmailAddresses $ContactEMailForLetsEncrypt -AcceptTOS | Out-Null
+
         Write-Host "Creating new dns Identifier"
         $state = Get-ACMEState -Path $stateDir
         New-ACMENonce $state -PassThru | Out-Null
