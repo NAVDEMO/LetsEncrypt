@@ -74,12 +74,12 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         $order = New-ACMEOrder -state $stateDir -Identifiers $identifier
     
         Write-Host "Getting ACME Authorization"
-        $authorizations = @(Get-ACMEAuthorization -State $acmeStateDir -Order $order);
+        $authorizations = @(Get-ACMEAuthorization -State $stateDir -Order $order);
 
         foreach($authz in $authorizations) {
             # Select a challenge to fullfill
             Write-Host "Getting ACME Challenge"
-            $challenge = Get-ACMEChallenge -State $acmeStateDir -Authorization $authZ -Type "http-01";
+            $challenge = Get-ACMEChallenge -State $stateDir -Authorization $authZ -Type "http-01";
     
             # Create the file requested by the challenge
             $fileName = Join-Path "C:\inetpub\wwwroot" $challenge.Data.RelativeUrl
