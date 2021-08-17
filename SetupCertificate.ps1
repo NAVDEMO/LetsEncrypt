@@ -43,7 +43,7 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         Write-Host "Installing NuGet PackageProvider"
         Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
         
-        AddToStatus "Installing ACME-PS PowerShell Module"
+        Write-Host "Installing ACME-PS PowerShell Module"
         Install-Module -Name ACME-PS -RequiredVersion "1.5.0" -Force
 
         Write-Host "Importing ACME-PS module"
