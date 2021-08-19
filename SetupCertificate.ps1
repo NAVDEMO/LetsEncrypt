@@ -88,7 +88,7 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         Write-Host "Creating Challenge WebSite"
         $challengeLocalPath = 'c:\inetpub\wwwroot\challenge'
         New-Item $challengeLocalPath -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
-        New-Website -Name challenge -Port 80 -PhysicalPath $challengeLocalPath
+        New-Website -Name challenge -Port 80 -PhysicalPath $challengeLocalPath | Out-Null
 
 '<configuration>
   <location path=".">
