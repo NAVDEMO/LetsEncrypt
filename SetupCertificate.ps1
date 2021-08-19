@@ -10,9 +10,6 @@
 #     $certificateThumbprint
 #     $dnsIdentity
 
-$env:ContactEMailForLetsEncrypt = "fk@freddy.dk"
-$env:CertificatePfxPassword = "P@ssword1"
-
 $ContactEMailForLetsEncrypt = "$env:ContactEMailForLetsEncrypt"
 $CertificatePfxPassword = "$env:CertificatePfxPassword"
 $certificatePfxUrl = "$env:certificatePfxUrl"
