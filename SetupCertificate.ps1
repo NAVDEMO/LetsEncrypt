@@ -10,6 +10,9 @@
 #     $certificateThumbprint
 #     $dnsIdentity
 
+$env:ContactEMailForLetsEncrypt = "fk@freddy.dk"
+$env:CertificatePfxPassword = "P@ssword1"
+
 $ContactEMailForLetsEncrypt = "$env:ContactEMailForLetsEncrypt"
 $CertificatePfxPassword = "$env:CertificatePfxPassword"
 $certificatePfxUrl = "$env:certificatePfxUrl"
@@ -132,7 +135,7 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
                     Invoke-WebRequest -Uri "http://$($challenge.Data.AbsoluteUrl)" -UseBasicParsing | out-null
                 }
                 catch {
-                    $secs = [int]$cnt*10
+                    $secs = [int]$cnt*2
                     Write-Host "Error - waiting $secs seconds"
                     Start-Sleep -Seconds $secs
                 }
@@ -185,12 +188,13 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
     }
 
     Write-Host "Removing Challenge WebSite"
-    try {
-        Remove-Website -Name challenge
-    } catch {}
+    Get-Website | Where-Object { $_.Name -eq 'challenge' } | % {
+        Stop-Website -Name $_.Name
+        Remove-Website -Name $_.Name
+    }
 
     Write-Host "Starting Web Sites"
-    Get-Website | Start-Website
+    Get-Website | Where-Object { $_.Name -ne 'challenge' } | Start-Website
 
 } else {
     . (Join-Path $runPath $MyInvocation.MyCommand.Name)
