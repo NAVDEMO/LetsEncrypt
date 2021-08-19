@@ -36,14 +36,17 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
 } elseif ("$ContactEMailForLetsEncrypt" -ne "") {
 
     try {
+        Write-Host "Stopping Web Sites"
+        Get-Website | Stop-Website
+ 
         Write-Host "Using LetsEncrypt to create SSL Certificate"
 
-        $nuGetProvider = Get-PackageProvider -Name NuGet
+        $nuGetProvider = Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue
         if ((-not $nuGetProvider) -or ([Version]$nuGetProvider.Version -lt [Version]"2.8.5.201")) {
             Write-Host "Installing NuGet Package Provider"
             Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force | Out-Null
         }
-        $acmePSModule = Get-InstalledModule -Name ACME-PS
+        $acmePSModule = Get-InstalledModule -Name ACME-PS -ErrorAction SilentlyContinue
         if ((-not $acmePSModule) -or ([Version]$acmePSModule.Version -lt [Version]"1.5.0")) {
             Write-Host "Installing ACME-PS PowerShell Module"
             Install-Module -Name ACME-PS -RequiredVersion "1.5.0" -Force
@@ -61,13 +64,13 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         Write-Host "Registring Contact EMail address and accept Terms Of Service"
         Get-ACMEServiceDirectory -State $stateDir -ServiceName "LetsEncrypt" -PassThru | Out-Null
 
-        Write-Host "New Nonce"
+        Write-Host "Creating New Nonce"
         New-ACMENonce -State $stateDir | Out-Null
 
-        Write-Host "New AccountKey"
+        Write-Host "Creating New AccountKey"
         New-ACMEAccountKey -state $stateDir -PassThru | Out-Null
 
-        Write-Host "New Account"
+        Write-Host "Creating New Account"
         New-ACMEAccount -state $stateDir -EmailAddresses $ContactEMailForLetsEncrypt -AcceptTOS | Out-Null
 
         Write-Host "Creating new dns Identifier"
@@ -79,13 +82,40 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         Write-Host "Getting ACME Authorization"
         $authorizations = @(Get-ACMEAuthorization -State $stateDir -Order $order);
 
+        Write-Host "Creating Challenge WebSite"
+        $challengeLocalPath = 'c:\inetpub\wwwroot\challenge'
+        New-Item $challengeLocalPath -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+        New-Website -Name challenge -Port 80 -PhysicalPath $challengeLocalPath
+
+'<configuration>
+  <location path=".">
+    <system.webServer>
+      <httpProtocol>
+        <customHeaders>
+          <add name="X-Content-Type-Options" value="nosniff" />
+        </customHeaders>
+        </httpProtocol>
+        <staticContent>
+          <mimeMap fileExtension=".*" mimeType="application/octet-stream" />
+          <mimeMap fileExtension="." mimeType="text/plain" />
+        </staticContent>
+      <directoryBrowse enabled="true" />
+    </system.webServer>
+  </location>
+</configuration>
+' | Set-Content (Join-Path $challengeLocalPath 'web.config')
+
+        Write-Host "Starting Challenge WebSite"
+        Start-Website -Name challenge
+
         foreach($authz in $authorizations) {
             # Select a challenge to fullfill
             Write-Host "Getting ACME Challenge"
             $challenge = Get-ACMEChallenge -State $stateDir -Authorization $authZ -Type "http-01";
     
             # Create the file requested by the challenge
-            $fileName = Join-Path "C:\inetpub\wwwroot" $challenge.Data.RelativeUrl
+            $fileName = Join-Path $challengeLocalPath $challenge.Data.RelativeUrl
+            Write-Host $filename
             $challengePath = [System.IO.Path]::GetDirectoryName($filename);
 
             if(-not (Test-Path $challengePath)) {
@@ -95,8 +125,18 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
             Set-Content -Path $fileName -Value $challenge.Data.Content -NoNewLine
     
             # Check if the challenge is readable
-            Write-Host "Check Challenge"
-            Invoke-WebRequest $challenge.Data.AbsoluteUrl -UseBasicParsing | Out-Null
+            Write-Host "Checking Challenge at http://$($challenge.Data.AbsoluteUrl)"
+            1..10 | % {
+                $cnt = $_
+                try {
+                    Invoke-WebRequest -Uri "http://$($challenge.Data.AbsoluteUrl)" -UseBasicParsing | out-null
+                }
+                catch {
+                    $secs = [int]$cnt*10
+                    Write-Host "Error - waiting $secs seconds"
+                    Start-Sleep -Seconds $secs
+                }
+            }
     
             Write-Host "Completing ACME Challenge"
             # Signal the ACME server that the challenge is ready
@@ -122,8 +162,8 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
         }
     
         # As soon as the url shows up we can create the PFX
-        Write-Host "Exporting certificate to $certificatePfxFilename"
-        Export-ACMECertificate -state $stateDir -Order $order -CertificateKey $certKey -Path $certificatePfxFilename -Password $certificatePfxPassword
+        Write-Host "Exporting certificate to $certificatePfxFile"
+        Export-ACMECertificate -state $stateDir -Order $order -CertificateKey $certKey -Path $certificatePfxFile -Password (ConvertTo-SecureString -String $certificatePfxPassword -AsPlainText -Force)
     
         $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certificatePfxFile, $certificatePfxPassword)
         $certificateThumbprint = $cert.Thumbprint
@@ -140,10 +180,18 @@ if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
     catch {
         # If Any error occurs (f.ex. rate-limits), setup self signed certificate
         Write-Host "Error creating letsEncrypt certificate, reverting to self-signed"
-        Write-Host "Error was:"
-        Write-Host $_.Exception.Message
+        Write-Host "Error was: $($_.Exception.Message)"
         . (Join-Path $runPath $MyInvocation.MyCommand.Name)
     }
+
+    Write-Host "Removing Challenge WebSite"
+    try {
+        Remove-Website -Name challenge
+    } catch {}
+
+    Write-Host "Starting Web Sites"
+    Get-Website | Start-Website
+
 } else {
     . (Join-Path $runPath $MyInvocation.MyCommand.Name)
 }
