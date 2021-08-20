@@ -4,6 +4,7 @@
 #     $env:ContactEMailForLetsEncrypt
 #     $env:CerificatePfxPassword
 #     $env:CerificatePfxUrl
+#     $env:certificatePfxFile
 #
 # OUTPUT
 #     $certificateCerFile (if self signed)
@@ -13,13 +14,14 @@
 $ContactEMailForLetsEncrypt = "$env:ContactEMailForLetsEncrypt"
 $CertificatePfxPassword = "$env:CertificatePfxPassword"
 $certificatePfxUrl = "$env:certificatePfxUrl"
-$certificatePfxFile = ""
-
-if ("$certificatePfxUrl" -ne "" -and "$CertificatePfxPassword" -ne "") {
-
-    $certificatePfxFile = Join-Path $myPath "certificate.pfx"
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    (New-Object System.Net.WebClient).DownloadFile($certificatePfxUrl, $certificatePfxFile)
+$certificatePfxFile = "$env:certificatePfxFile"
+ 
+if (("$certificatePfxUrl" -ne "" -or "$certificatePfxFile" -ne "") -and "$CertificatePfxPassword" -ne "") {
+    if ("$certificatePfxUrl" -ne "") {
+        $certificatePfxFile = Join-Path $myPath "certificate.pfx"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        (New-Object System.Net.WebClient).DownloadFile($certificatePfxUrl, $certificatePfxFile)
+    }
     $cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($certificatePfxFile, $certificatePfxPassword)
     $certificateThumbprint = $cert.Thumbprint
     Write-Host "Certificate File Thumbprint $certificateThumbprint"
